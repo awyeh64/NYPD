@@ -1,0 +1,133 @@
+---
+title: "nypd"
+author: ''
+date: "1/28/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# PROJECT 2: NYPD DATASET 
+
+  In this write-up I will be going over the NYPD csv file as directed in the class from the data.gov website.  Specifically I will be using the 'NYPD Shooting Incident Data(Historic)' file which can be found at this [link](https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic).
+
+# Data Importing
+
+  To begin I will import some libraries that I will plan on using, mainly 'tidyr', 'tidyverse', 'lubridate', and 'ggplot2'.  Next I will import the csv file that I will be working on into a local variable named 'nypd_csv'.
+
+
+```{r data_import, echo=TRUE, message= FALSE, results='hide'}
+library(tidyr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+
+url <- 'https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD'
+nypd_csv <- read_csv(url)
+```
+# Data Wrangling
+ 
+  As there are a good number of columns in the data, due to the fact that I do not require the large majority of them I created a new dataframe based on the original csv but with columns that I determine as being usable.  This will cut down greatly the number of data to work with and ease the burden of wading through many un-necessary rows.  The new dataframe will simply be called 'df' for ease of typing throughout the document.
+
+```{r cleanup_columns, echo=TRUE}
+keep <- c("OCCUR_DATE", "OCCUR_TIME", "BORO", "PRECINCT", "LOCATION_DESC", "PERP_AGE_GROUP", "PERP_SEX", "VIC_AGE_GROUP", "VIC_SEX", "Latitude", "Longitude")
+df <- nypd_csv[keep]
+
+summary(df)
+```
+
+  The next step will be to check my new dataframe for any NaN or NA values.
+
+```{r na_values}
+colSums(is.na(df))/nrow(df)
+```
+
+  As we can see, both the location description columns as well as information on the perpetrator both have significant amounts of invalid values, with location description being more than half filled with NAs.  Due to the large percentage, I determined that simply dropping the rows would be too harmful to the amount of data so I decided to fill in all the NA values with the phrase 'UNKNOWN'.  Luckily, both the perpetrator age group and sex columns are set to be 'char' values as well so this will be an easy process of replacing one value with another.  If we run another 'colSums()' we can see that there are no more NA values to be found.
+
+
+```{r fill_na}
+df <- df %>% replace_na(list(LOCATION_DESC = 'UNKNOWN', PERP_AGE_GROUP = 'UKNOWN', PERP_SEX = 'UNKNOWN'))
+colSums(is.na(df))/nrow(df)
+```
+
+  Another bit of cleaning that I have done includes combining the perpetrator and victim columns into one column.  By combining the two, it will give a better sense of the demographic involved in the incident which I will use for visualizations later in the document.
+
+```{r data_cleaning}
+df <- df %>% unite('PERP', PERP_AGE_GROUP:PERP_SEX, remove = TRUE)
+df <- df %>% unite('VIC', VIC_AGE_GROUP:VIC_SEX, remove = TRUE)
+```
+
+# Plots
+
+  The first plot that I have done involves looking at the type of locations the incidents are more likely to happen in.  Ignoring the fact that most incidents do not have a stated location (unknown), we can see that of the incidents that do have their location stated, the large majority are located in residential buildings.
+
+```{r plot1}
+g <- ggplot(df, aes(y=reorder(LOCATION_DESC,LOCATION_DESC, function(y)+length(y)))) + geom_bar()
+g + labs(x = "Count", y = "Incident Location Description")
+```
+
+\newpage
+
+  The second plot is determining the top demographic that the perpetrator is more likely to come from.  While unknown values are still rampant in many incidents, we can see that males vastly take up the rankings when it comes to being the perpetrator, with 18-24 age range at the top followed by 25-44, then less than 18.
+
+```{r plot2}
+g <- ggplot(df, aes(y=reorder(PERP,PERP, function(y)+length(y)))) + geom_bar()
+g + labs(x = "Count", y = "Perpetrators")
+```
+
+\newpage
+
+  On the other hand, the third plot looks at the victims for each incident; unlike the perpetrators, these are much more well documented so the number of unknowns is significantly lower.  From the rankings we can see that similarly males from ages 18-44 are the most common victims.
+
+```{r plot3}
+g <- ggplot(df, aes(y=reorder(VIC,VIC, function(y)+length(y)))) + geom_bar()
+g + labs(x = "Count", y = "Victims")
+```
+
+\newpage
+
+  The fourth plot looks at the location where most of the incidents take place when it comes to official boroughs in New York.  The Brooklyn borough takes the significant lead over the other locations, with almost more than the 2nd and 3rd place combined.
+
+```{r plot4}
+g <- ggplot(df, aes(y=reorder(BORO,BORO, function(y)+length(y)))) + geom_bar()
+g + labs(x = "Count", y = "Incident Location")
+```
+
+\newpage
+
+  Lastly in the fifth plot we have the longitude and latitude for each incident plotted.  While I do not have the technical expertise yet to overlap a map of New York onto this plot, judging from my 4th plot I can connect the two and assume that the highest ranking boros on the countplot are also located where the dots in this plot are clumped together.
+
+```{r plot5}
+g <- ggplot(df, aes(x=Latitude, y=Longitude)) + geom_point()
+g + labs(x = "Latitude", y = "Longitude")
+
+```
+
+\newpage
+
+# Modeling
+
+  For my model, I decided to use my previous plot since it plotted two convenient numerous variables together and utilize them for a linear model.  I wanted to predict an incident's assumed Longitude value given a Latitude value so I created a grid of sequential values from 40.5 to 40.9 (roughly the minimum and maximum latitude values of New York in our given dataset) with an increment of 0.1 between each value as inputs for the potential model.  After creating a model built on the original dataset, I then created a new one where I mutated the old dataframe and added a new 'pred' column which applied my model coefficients to my artificially created inputs, then plotted it along with the original values.  While the accuracy of this model is undoubtedly questionable due to the way longitude and latitude values work, at the very least from this plot we can infer that the large majority of the crimes are centered around the red line.
+
+```{r model}
+mod <- lm(Longitude ~ Latitude, data = df)
+x_grid <- seq(40.5, 40.9, 0.1)
+df_w_pred <- df %>% mutate(pred = predict(mod))
+df_w_pred %>% ggplot() + geom_point(aes(x = Latitude, y = Longitude), color = "blue") + geom_point(aes(x = Latitude, y = pred), color = "red")
+```
+
+# Conclusion and Bias
+  In conclusion, when it comes to bias, I believe that the dataset itself isn't very biased due to being official documents from a government agency.  I trust (or hope) that police data will be unbiased and attempt to accurately document the incident as best as they can due to the necessity for important investigations.  However I will admit that I do have my own personal biases, as whenever I think of the phrase 'criminal' I picture a young adult male.  To combat this I tried making the section on the perpetrators' demographic just a single part of the document, and instead focus on other pieces of information that can be inferred from the data such as location and location description.  By looking at a map of boroughs in New York with longitudes and latitudes, it is indeed true that the borough with the highest amount of incidents, Brooklyn, also contains the majority of the dots in our plot of incidents.
+  
+
+
+# Session Info
+
+
+```{r sessioninfo, echo=FALSE}
+sessionInfo()
+```
